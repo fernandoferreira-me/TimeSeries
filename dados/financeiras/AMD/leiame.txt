@@ -1,0 +1,4 @@
+'Open'    'High'    'Low'    'Close'
+
+de   2-Jan-04 
+até  1-Sep-06

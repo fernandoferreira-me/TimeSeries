@@ -1,0 +1,9 @@
+function [ output_args ] = hetero(serie,crescimeto)
+%Aplica a função exponencial na série para retirar a heterocedasticidade
+%crescimeto: modelo de crescimento da variancia. Ex.: crescimento=[1:T]/T
+
+ residuo=serie./exp(crescimeto);
+
+
+end
+
