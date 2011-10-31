@@ -136,15 +136,18 @@ classdef TimeSeries < hgsetget
 			obj.removeCycles()
 		end
 
-		function createEstimatorModel(obj)
+		function assembleData(obj)
 			close all;
+			%% Study xcorrelations
 			fs = obj.removeNaN(obj.ts);
 			nSerie = size(fs,1);
 			obj.model.estimator.used_lags = cell(nSerie);
+			obj.model.estimator.input = cell(nSerie,1);
+			obj.model.estimator.target = cell(nSerie,1);
 			for index=1:nSerie % create one estimator for each serie
 				for k=1:nSerie
 					% Find correlation in the time window
-					[xcf, ~, bounds] = crosscorr(fs(index,:)', fs(k,:)',...
+					[xcf, ~, bounds] = crosscorr(fs(k,:)', fs(index,:)',...
 						obj.nnParams.corr_lag, obj.nnParams.corr_nstd);
 					xcf = xcf(floor(size(xcf,1)/2)+2:end);
 					used_lags = find(abs(xcf) > bounds(1));
@@ -173,10 +176,23 @@ classdef TimeSeries < hgsetget
 						cumindex = cumindex + n;
 					end
 				else
-					input = [];
+					input = fs(index, events_to_ignore-1 :end-1);
 				end
-				obj.model.estimator.input{index} = input;
+				obj.model.estimator.input{index}  = input;
+				obj.model.estimator.target{index} = fs(index, events_to_ignore:end);
 			end
-		end
-	end
+		end %assembleData
+
+		function createEstimator(obj, nnobj)
+			obj.model.estimator.net = cell(size(obj.ts,1),1)
+			for index=1:size(obj.ts,1)
+				if ~obj.model.estimator.use_random_walk
+					input  = obj.model.estimator.input{index};
+					target = obj.model.estimator.target{index};
+					nnobj.train(input, target);
+					obj.model.estimator.net{index} = nnobj.best_net;
+				end
+			end
+		end%createEstimator
+	end%methods
 end
