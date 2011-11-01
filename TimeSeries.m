@@ -135,22 +135,22 @@ classdef TimeSeries < hgsetget
 				end
 			elseif nargin == 2
 				if ~strcmpi(opt, 'test')
-					err = MException('TimeSeries:removeHeteroscedastic', ...
-					'Usage: removeHeteroscedastic() or removeHeteroscedastic(''test'')');
+					err = MException('TimeSeries:removeStochasticTrend', ...
+					'Usage: removeStochasticTrend() or removeStochasticTrend(''test'')');
 					throw(err);
 				end
 				if size(obj.test_serie,2) == 0
-					err = MException('TimeSeries:removeHeteroscedastic', ...
+					err = MException('TimeSeries:removeStochasticTrend', ...
 					'No serie for testing. Use: TimeSerie::test_serie(serie) ');
 					throw(err);
 				end
 				if ~isfield(obj.model, 'n_unit_root')
-					err = MException('TimeSeries:removeHeteroscedastic', ...
+					err = MException('TimeSeries:removeStochasticTrend', ...
 					'No model was created. You should probably run TimeSeries::preprocess().');
 					throw(err);
 				end
 				if length(obj.model.n_unit_root) ~= size(obj.test_serie, 1)
-					err = MException('TimeSeries:removeHeteroscedastic', ...
+					err = MException('TimeSeries:removeStochasticTrend', ...
 						'Model and given serie dimensions are not compatible.');
 					throw(err);
 				end
