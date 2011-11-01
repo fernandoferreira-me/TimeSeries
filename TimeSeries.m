@@ -124,22 +124,50 @@ classdef TimeSeries < hgsetget
 			end
 		end
 
-		function removeStochasticTrend(obj)
-			[fs, n] = obj.removeNaN(obj.ts);
-			ndiff = obj.ordint(fs);
-			fprintf('\n Suggested number of root unit: ');
-			disp(ndiff);
-			for i=1:length(ndiff)
-				serie = fs(i,:);
-				ndiff(i) = input('Number of unitary root should be used? ');
-				fs_diff = diff(serie, ndiff(i));
+		function removeStochasticTrend(obj, opt)
+			if nargin == 1
+				[fs, n] = obj.removeNaN(obj.ts);
+				ndiff = obj.ordint(fs);
+				fprintf('\n Suggested number of root unit: ');
+				disp(ndiff);
+				for i=1:length(ndiff)
+					ndiff(i) = input('Number of unitary root should be used? ');
+				end
+			elseif nargin == 2
+				if ~strcmpi(opt, 'test')
+					err = MException('TimeSeries:removeHeteroscedastic', ...
+					'Usage: removeHeteroscedastic() or removeHeteroscedastic(''test'')');
+					throw(err);
+				end
+				if size(obj.test_serie,2) == 0
+					err = MException('TimeSeries:removeHeteroscedastic', ...
+					'No serie for testing. Use: TimeSerie::test_serie(serie) ');
+					throw(err);
+				end
+				if ~isfield(obj.model, 'n_unit_root')
+					err = MException('TimeSeries:removeHeteroscedastic', ...
+					'No model was created. You should probably run TimeSeries::preprocess().');
+					throw(err);
+				end
+				if length(obj.model.n_unit_root) ~= size(obj.test_serie, 1)
+					err = MException('TimeSeries:removeHeteroscedastic', ...
+						'Model and given serie dimensions are not compatible.');
+					throw(err);
+				end
+				[fs, n] = obj.removeNaN(obj.test_serie);
+			end
+			for k=1:length(ndiff)
+				fs_diff = diff(fs(k,:), ndiff(k));
 				nan_array = NaN(1, ndiff(i));
-				fs_diff = [nan_array fs_diff];
-				fs(i,:) = fs_diff;
+				fs(k,:) = [nan_array fs_diff];
 			end
 			fs = obj.addNaN(fs, n);
-			obj.ts = fs;
-			obj.model.n_unit_root = ndiff;
+			if nargin == 1
+				obj.ts = fs;
+				obj.model.n_unit_root = ndiff;
+			elseif nargin == 2
+				obj.test_serie = fs;
+			end
 		end
 
 		function removeSeasonality(obj)
@@ -239,6 +267,7 @@ classdef TimeSeries < hgsetget
 		function applyModel(obj, test_serie)
 			obj.test_serie = test_serie;
 			obj.removeHeteroscedastic('test');
+			obj.removeStochasticTrend('test');
 		end %applyModel
 	end%methods
 end
