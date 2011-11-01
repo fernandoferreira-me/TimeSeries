@@ -1,6 +1,7 @@
 % Author: Fernando Ferreira
 % email: fferreira@lps.ufrj.br
 % Oct 2011
+% Matlab 2011a required
 
 classdef TimeSeries < hgsetget
 	properties
@@ -8,13 +9,21 @@ classdef TimeSeries < hgsetget
 		ts                            % Timeseries
 		model = cell({})              % cell containing features from the series
 		nnParams = cell({})             % Parameters for NN
+		test_serie
+		test_serie_original
 	end
 	methods
+		%% Set and get methods
+		function obj = set.test_serie(obj, serie)
+			obj.test_serie=serie;
+			obj.test_serie_original= serie;
+		end
+
+		%% Core Methods
 		function obj = TimeSeries(serie)
 			obj.ts_original = serie;
 			obj.ts = serie;
 			nSeries =  size(serie,1);
-			obj.model.has_heteroscedastic = false(1,nSeries);
 			%% Temporary
 			obj.nnParams.corr_lag  = 10;
 			obj.nnParams.corr_nstd =  3; % 99%
@@ -43,22 +52,54 @@ classdef TimeSeries < hgsetget
 			fs(:,isnan(fs(1,:))) = [];
 		end
 
-		function removeHeteroscedastic(obj)
-			[fs, n] = obj.removeNaN(obj.ts);
-			[nSeries,nEvents] =size(fs);
-			for i = 1:nSeries
-				serie = fs(i,:);
-				obj.plotSerie(serie);
-				fprintf('\nRemove heteroscedastic using logarithmic function?');
-				if yesno
-					obj.model.has_heteroscedastic(i) = true;
-					serie = serie ./exp((1:nEvents)/nEvents);
+		function removeHeteroscedastic(obj,opt)
+			if nargin == 1
+				[fs, n] = obj.removeNaN(obj.ts);
+				[nSeries,nEvents] =size(fs);
+				obj.model.has_heteroscedastic = false(1,nSeries);
+				for k= 1:nSeries
+					serie = fs(k,:);
+					obj.plotSerie(serie);
+					fprintf('\nRemove heteroscedastic using logarithmic function?');
+					if yesno
+						obj.model.has_heteroscedastic(k) = true;
+						serie = serie ./exp((1:nEvents)/nEvents);
+					end
+					fs(k,:) = serie;
 				end
-				fs(i,:) = serie;
+				fprintf('\n');
+				fs = obj.addNaN(fs, n);
+				obj.ts = fs;
+			elseif nargin == 2
+				if ~strcmpi(opt, 'test')
+					err = MException('TimeSeries:removeHeteroscedastic', ...
+					'Usage: removeHeteroscedastic() or removeHeteroscedastic(''test'')');
+					throw(err);
+				end
+				if size(obj.test_serie,2) == 0
+					err = MException('TimeSeries:removeHeteroscedastic', ...
+					'No serie for testing. Use: TimeSerie::test_serie(serie) ');
+					throw(err);
+				end
+				serie = obj.test_serie;
+				if isfield(obj.model, 'has_heteroscedastic')
+					[fs, n] = obj.removeNaN(serie);
+					[nSeries,nEvents] =size(fs);
+					if length(obj.model.has_heteroscedastic) ~= size(serie, 1)
+						err = MException('TimeSeries:removeHeteroscedastic', ...
+							'Model and given serie dimensions are not compatible.');
+						throw(err);
+					end
+					H = double(obj.model.has_heteroscedastic) ./ ...
+						repmat(exp((1:nEvents)/nEvents), nSeries, 1);
+					fs = obj.addNaN(serie .* H, n);
+					obj.test_serie = fs;
+				else
+					err = MException('TimeSeries:removeHeteroscedastic', ...
+					'No model was created. You should probably run TimeSeries::preprocess().');
+					throw(err);
+				end
 			end
-			fprintf('\n');
-			fs = obj.addNaN(fs, n);
-			obj.ts = fs;
 			close all
 		end
 
@@ -156,7 +197,7 @@ classdef TimeSeries < hgsetget
 			end %end for i
 			no_corr = cellfun(@isempty, obj.model.estimator.used_lags);
 			obj.model.estimator.use_random_walk = ...
-				logical(idivide(int32(sum(no_corr,2)),int32(nSerie)))';
+				logical(sum(no_corr,2) == nSerie)';
 			%% Assemble the estimator input and target dataset
 			nNodes = sum(cellfun(@length, obj.model.estimator.used_lags),2);
 			for index=1:nSerie
@@ -170,8 +211,8 @@ classdef TimeSeries < hgsetget
 					for k=1:nSerie
 						n = length(used_lags{k});
 						for event=events_to_ignore:size(fs,2)
-							input(cumindex+1:cumindex+n, event+1-events_to_ignore) = ...
-								fs(k, event - used_lags{k});
+							input(cumindex+1:cumindex+n, event+1-...
+								events_to_ignore) = fs(k, event - used_lags{k});
 						end
 						cumindex = cumindex + n;
 					end
@@ -184,7 +225,7 @@ classdef TimeSeries < hgsetget
 		end %assembleData
 
 		function createEstimator(obj, nnobj)
-			obj.model.estimator.net = cell(size(obj.ts,1),1)
+			obj.model.estimator.net = cell(size(obj.ts,1),1);
 			for index=1:size(obj.ts,1)
 				if ~obj.model.estimator.use_random_walk
 					input  = obj.model.estimator.input{index};
@@ -194,5 +235,10 @@ classdef TimeSeries < hgsetget
 				end
 			end
 		end%createEstimator
+
+		function applyModel(obj, test_serie)
+			obj.test_serie = test_serie;
+			obj.removeHeteroscedastic('test');
+		end %applyModel
 	end%methods
 end

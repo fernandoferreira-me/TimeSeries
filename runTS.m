@@ -10,15 +10,20 @@ clear, clc
 addpath('data/sinteticos');
 [serie_trval, serie_test] = sinteticas(0);
 
+% Apply ICA (FastICA - SOBIRO)
+
 % Load Object
 TS = TimeSeries(serie_trval);
-
-% Apply ICA (FastICA - SOBIRO)
 
 % Preprocessing
 TS.preprocess();
 
-% Train Neural Network
+% Create Estimator Engine
 TS.assembleData();
 nnobj = swirlTraining();
-%TS.createEstimator(nnobj);
+TS.createEstimator(nnobj);
+
+% Apply model in test set
+
+TS.applyModel(test_serie);
+
