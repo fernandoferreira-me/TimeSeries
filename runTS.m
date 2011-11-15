@@ -24,6 +24,6 @@ nnobj = swirlTraining();
 TS.createEstimator(nnobj);
 
 % Apply model in test set
-
 TS.applyModel(test_serie);
+
 
