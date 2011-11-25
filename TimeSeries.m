@@ -1,4 +1,5 @@
 % Author: Fernando Ferreira
+
 % email: fferreira@lps.ufrj.br
 % Oct 2011
 % Matlab 2011a required
@@ -10,16 +11,15 @@ classdef TimeSeries < hgsetget
 		model = cell({})         % cell containing features from the series
 		nnParams = cell({})      % Parameters for NN
 		test_serie
+		test_serie_residue
 		test_serie_original
 		input_test
 		estimated_output
+		output
+		output_gaps
 	end
 	methods
-		%% Set and get methods
-		function obj = set.test_serie(obj, serie)
-			obj.test_serie=serie;
-			obj.test_serie_original= serie;
-		end
+
 
 		%% Core Methods
 		function obj = TimeSeries(serie)
@@ -30,49 +30,35 @@ classdef TimeSeries < hgsetget
 			obj.nnParams.corr_lag  = 10;
 			obj.nnParams.corr_nstd =  3; % 99%
 		end
-
-		function plotSerie(obj,serie)
-			figure;
-			hold on;
-			plot(serie);
-			grid on;
+		%% Set and get methods
+		function obj = set.test_serie(obj, serie)
+			obj.test_serie=serie;
+			obj.test_serie_original= serie;
 		end
-
-		function fs = addNaN(obj,serie, n)
-			if n ~= 0
-				n_serie = size(serie,1);
-				nan_matrix = NaN(n_serie, n);
-				fs = [nan_matrix serie];
-			else
-				fs = serie;
-			end
-		end
-
-		function [fs,n] = removeNaN(obj,serie)
-			fs = serie;
-			n = size(fs(:,isnan(fs(1,:))),2);
-			fs(:,isnan(fs(1,:))) = [];
+		function obj = set.test_serie_original(obj, serie)
+			obj.test_serie_original= serie;
 		end
 
 		%% Pre-processing block
 		function removeHeteroscedastic(obj,opt)
 			if nargin == 1
-				[fs, n] = obj.removeNaN(obj.ts);
-				[nSeries,nEvents] =size(fs);
+				[nSeries,nEvents] =size(obj.ts);
 				obj.model.has_heteroscedastic = false(1,nSeries);
 				for k= 1:nSeries
-					serie = fs(k,:);
-					obj.plotSerie(serie);
+					serie = obj.ts(k,:);
+					plotSerie(serie);
 					fprintf('\nRemove heteroscedastic using logarithmic function?');
 					if yesno
 						obj.model.has_heteroscedastic(k) = true;
-						serie = serie ./exp((1:nEvents)/nEvents);
 					end
-					fs(k,:) = serie;
 				end
 				fprintf('\n');
-				fs = obj.addNaN(fs, n);
-				obj.ts = fs;
+				H = repmat(...
+					(obj.model.has_heteroscedastic)'...
+					, 1, nEvents) ./ ...
+					repmat(exp((1:nEvents)/nEvents), nSeries, 1);
+				H(H==0)=1;
+				obj.ts = obj.ts .* H;
 			elseif nargin == 2
 				if ~strcmpi(opt, 'test')
 					err = MException('TimeSeries:removeHeteroscedastic', ...
@@ -86,8 +72,7 @@ classdef TimeSeries < hgsetget
 				end
 				serie = obj.test_serie;
 				if isfield(obj.model, 'has_heteroscedastic')
-					[fs, n] = obj.removeNaN(serie);
-					[nSeries,nEvents] =size(fs);
+					[nSeries,nEvents] =size(serie);
 					if length(obj.model.has_heteroscedastic) ~= size(serie, 1)
 						err = MException('TimeSeries:removeHeteroscedastic', ...
 							'Model and given serie dimensions are not compatible.');
@@ -98,8 +83,7 @@ classdef TimeSeries < hgsetget
 						, 1, nEvents) ./ ...
 						repmat(exp((1:nEvents)/nEvents), nSeries, 1);
 					H(H==0)=1;
-					fs = obj.addNaN(serie .* H, n);
-					obj.test_serie = fs;
+					obj.test_serie = serie .* H;
 				else
 					err = MException('TimeSeries:removeHeteroscedastic', ...
 					'No model was created. You should probably run TimeSeries::preprocess().');
@@ -109,32 +93,10 @@ classdef TimeSeries < hgsetget
 			close all
 		end
 
-		function ndiff = ordint(obj, serie)
-			nSerie = size(serie,1);
-			ndiff = zeros(1, nSerie);
-			for i=1:nSerie
-				s = serie(1,:);
-				has_root = true;
-				DWbound = 5e-2;
-				while has_root,
-					[ADF, ~, ~, ~] = unitroot (s);
-					if(ADF(3,4) <= 1e-1 && (abs(ADF(1,2)-2) < DWbound))
-						has_root = false;
-					elseif ADF(3,1) <= 0.1
-						has_root = false;
-					else
-						ndiff(i) = ndiff(i) + 1;
-						s = diff(s);
-					end
-				end
-			end
-		end
-
-
 		function removeStochasticTrend(obj, opt)
 			if nargin == 1
-				[fs, n] = obj.removeNaN(obj.ts);
-				ndiff = obj.ordint(fs);
+				[fs, n] = removeNaN(obj.ts);
+				ndiff = ordint(fs);
 				fprintf('\n Suggested number of root unit: ');
 				disp(ndiff);
 				for i=1:length(ndiff)
@@ -161,17 +123,17 @@ classdef TimeSeries < hgsetget
 						'Model and given serie dimensions are not compatible.');
 					throw(err);
 				end
-				[fs, n] = obj.removeNaN(obj.test_serie);
+				[fs, n] = removeNaN(obj.test_serie);
 				ndiff = obj.model.n_unit_root;
 			end
-			obj.model.initial_condition= cell(length(ndiff));
+			obj.model.s_trend.initial_condition= cell(length(ndiff),1);
 			for k=1:length(ndiff)
 				[fs_diff, X0] = diff2(fs(k,:), ndiff(k));
 				nan_array = NaN(1, ndiff(k));
 				fs(k,:) = [nan_array fs_diff];
-				obj.model.initial_condition(k) = X0;
+				obj.model.s_trend.initial_condition{k} = X0;
 			end
-			fs = obj.addNaN(fs, n);
+			fs = addNaN(fs, n);
 			if nargin == 1
 				obj.ts = fs;
 				obj.model.n_unit_root = ndiff;
@@ -182,36 +144,38 @@ classdef TimeSeries < hgsetget
 
 		function removeSeasonality(obj, opt)
 			nSTD = 3;
-			%Using functions written by Faier
-			%TODO : re-coding
-			%addpath('pp/')
-			%addpath('auxiliar/')
 			if nargin == 1
-				[fs, n] = obj.removeNaN(obj.ts);
+				[fs, n] = removeNaN(obj.ts);
 			%   Visual Test
 				[nSeries, nEvents] = size(fs);
 				residue = NaN(nSeries, nEvents);
 				obj.model.seasonality = cell(nSeries,1);
 				for k=1:nSeries
 					[acf, ~, bounds] = crosscorr(fs(k,:), fs(k,:), nEvents-2, nSTD);
-					acf = acf(floor(size(acf,1)/2)+2:end);
+					acf = acf(floor(size(acf,2)/2)+2:end);
 					p = figure(); hold on; grid on;
-					stem(1:size(acf,1), acf, 'b.');
+					stem(1:size(acf,2), acf, 'b.');
 					plot([1 nEvents-2] , [bounds(1) bounds(1)], 'k-');
 					plot([1 nEvents-2] , [bounds(2) bounds(2)], 'k-');
 					title(sprintf('Visual test for serie %d', k));
 					hold off;
+
 					period = input(sprintf('Seasonality period for serie %d: ', k));
 					close(p);
-					y = zeros(nEvents-period,1);
-					for index=1:(nEvents - period)
-						y(index) = fs(index+period) - fs(index);
+					if period ~=0
+						y = zeros(nEvents-period,1);
+						for index=1:(nEvents - period)
+							y(index) = fs(k,index+period) - fs(k,index);
+						end
+						obj.model.seasonality{k}.x0 = fs(k,1:period);
+						residue(k,period+1:end) = y';
+					else
+						residue(k,1:end)=fs(k,:);
+						obj.model.seasonality{k}.x0 = [];
 					end
 					obj.model.seasonality{k}.period = period;
-					obj.model.seasonality{k}.x0 = fs(1:period);
-					residue(k,period+1:end) = y;
 				end
-				obj.ts = obj.addNaN(residue,n);
+				obj.ts = addNaN(residue,n);
 			elseif nargin == 2
 				if ~strcmpi(opt, 'test')
 					err = MException('TimeSeries:removeSeasonality', ...
@@ -228,32 +192,124 @@ classdef TimeSeries < hgsetget
 					'No model was created. You should probably run TimeSeries::preprocess().');
 					throw(err);
 				end
-				[fs, n] = obj.removeNaN(obj.test_serie);
+				[fs, n] = removeNaN(obj.test_serie);
 				[nSeries, nEvents] = size(fs);
 				residue = NaN(nSeries, nEvents);
 				for k=1:nSeries
 					period = obj.model.seasonality{k}.period;
-					y = zeros(nEvents-period,1);
+					y = zeros(1,nEvents-period);
 					for index=1:(nEvents - period)
-						y(index) = fs(index+period) - fs(index);
+						y(index) = fs(k,index+period) - fs(k,index);
 					end
 					residue(k,period+1:end) = y;
 				end
-				obj.test_serie = obj.addNaN(residue,n);
+				obj.test_serie = addNaN(residue,n);
 			end
 		end
 
-		function removeCycles(obj,opt)
-			%Using functions written by Faier
-			%TODO : re-coding
-			addpath('pp/')
-			addpath('auxiliar/')
+		function removeCyclesAndTrend(obj,opt)
 			if nargin == 1
-				[fs, n] = obj.removeNaN(obj.ts);
-				[serie, modelciclos] = ppciclos(fs);
-				fs = obj.addNaN(serie, n);
-				obj.ts = fs;
-				obj.model.cycles = modelciclos;
+				[fs, n] = removeNaN(obj.ts);
+				[nSeries, nEvents] = size(fs);
+				max_degree = 3;
+				threshold = 0.9;
+
+				obj.model.trend.degree = cell(nSeries,1);
+				obj.model.trend.coeffs = cell(nSeries,1);
+				obj.model.trend.yp     = cell(nSeries,1);
+
+				obj.model.cycles.components = cell(nSeries,1);
+				obj.model.cycles.ccos = cell(nSeries,1);
+				obj.model.cycles.csin = cell(nSeries,1);
+				obj.model.cycles.norm = cell(nSeries,1);
+				obj.model.cycles.w    = cell(nSeries,1);
+
+				for k=1:nSeries
+					% Remove deterministic trend
+					yp = cell(max_degree,1);
+					coeffs = cell(max_degree,1);
+					r2 = zeros(max_degree,1);
+					[serie, nNaN] = removeNaN(fs(k,:));
+					for d=1:length(r2)
+						coeffs{d}= polyfit(1:length(serie), serie, d);
+						yp{d} = polyval(coeffs{d}, 1:length(serie));
+						r2(d) = 1 - norm(serie - yp{d},2)^2/...
+							((length(serie)-1)*std(serie)^2);
+					end
+					degree = find(r2 > threshold ,1 );
+					p =  figure();
+					subplot(2,1,1);
+					plot(serie, 'b-');
+					if ~isempty(degree)
+						hold on;
+						plot(1:nEvents, yp{degree}, 'r--');
+					else
+						degree = 0;
+					end
+					grid on;
+					subplot(2,1,2);
+					bar(1:max_degree, r2);
+					grid on;
+					hold off;
+					fprintf('\n The time serie can be described by a  degree %d polynomial?'...
+						, degree);
+					if ~yesno
+						degree = inf;
+						while (degree >=  max_degree)
+							degree = input(sprintf('\nUse (degree < %d): ', max_degree));
+						end
+					end
+					close(p)
+					obj.model.trend.degree{k} = degree;
+					if degree ~= 0
+						obj.model.trend.coeffs{k} = coeffs{degree};
+						obj.model.trend.yp{k}     = yp{degree};
+						fs(k,:) = fs(k,:) -  yp{degree};
+					else
+						obj.model.trend.coeffs{k} = [];
+						obj.model.trend.yp{k}     = [];
+					end
+					% Remove Cycles
+					Y = serie';
+					L = length(Y);
+					fft_Y = fft(Y, length(Y));
+					ccos = real(fft_Y'/(floor(L/2)));
+					csin = imag(fft_Y'/(floor(L/2)));
+
+					% Plot signal spectrum
+					figure;
+					stem(1:floor(L/2)+1, 2*abs(fft_Y(1:floor(L/2)+1)));
+					xlabel('component');
+					ylabel('|Y|')
+					grid on;
+
+					nComponents = input('\n Number of meaningful components: ');
+					%status_fig = close(p);
+					components = zeros(nComponents,1);
+					%Extract Components
+					for nc=1:nComponents
+						[~ , index_max] = max(abs(fft_Y((1:floor(L/2)+1))));
+						components(nc) = index_max;
+						fft_Y(index_max) = 0;
+						if index_max ~= 1
+							fft_Y(L - index_max +2) = 0;
+						else
+							fprintf(...
+							'\nWarning: The first component is not a cycle, is DC.');
+							fprintf('\nAre you sure the pre-processing is correct?');
+						end
+					end
+
+					% Reconstruct signal size
+					serie = ifft(fft_Y)';
+					% Store parameters
+					obj.model.cycles.ccos{k} = ccos;
+					obj.model.cycles.csin{k} = csin;
+					obj.model.cycles.components{k} = components;
+					obj.model.cycles.w{k} = 2*pi*(0:L-1)/L;
+					fs(k,:) = addNaN(serie,nNaN);
+				end
+				obj.ts = addNaN(fs,n);
 			elseif nargin == 2
 				if ~strcmpi(opt, 'test')
 					err = MException('TimeSeries:removeCycles', ...
@@ -270,11 +326,29 @@ classdef TimeSeries < hgsetget
 					'No model was created. You should probably run TimeSeries::preprocess().');
 					throw(err);
 				end
-				[fs, n] = obj.removeNaN(obj.test_serie);
-				[serie] = ppciclosop(fs, obj.model.cycles);
-				fs = obj.addNaN(serie, n);
-				obj.ts = fs;
+				[fs, n] = removeNaN(obj.test_serie);
+				for k=1:size(fs, 1)
+					if obj.model.trend.degree{k}
+						% Remove Trend
+						yp = polyval(obj.model.coeffs{d}, 1:size(fs));
+						fs(k,:) = fs(k,:) - yp;
+					end
+					% Remove Cycles
+					component =  obj.model.cycles.components{k};
+					ccos = obj.model.cycles.ccos{k};
+					csin = obj.model.cycles.csin{k};
+					w    = obj.model.cycles.w{k};
+					t    = 0:(length(fs(k,:)) - 1);
+					for nc=1:length(component)
+						c = component(nc);
+						fs(k,:) = fs(k,:) - (...
+						ccos(c)*cos(w(c)*t) +...
+						csin(c)*sin(w(c)*t));
+					end
+				end
+				obj.test_serie = addNaN(fs,n);
 			end
+			close all;
 		end
 
 		function preprocess(obj)
@@ -286,48 +360,80 @@ classdef TimeSeries < hgsetget
 			% Remove Seasons
 			obj.removeSeasonality()
 			% Remove cycles
-			obj.removeCycles()
+			obj.removeCyclesAndTrend()
 		end
-
-
+		%%
 		%% Pos-processing block
-		function addCycles(obj)
+		function addCyclesAndTrend(obj)
+			series = obj.output;
+			[nSeries, nEvents] = size(series);
+			for k=1:nSeries
+				fs = series(k,:);
+				% Add Cycles
+				component =  obj.model.cycles.components{k};
+				ccos = obj.model.cycles.ccos{k};
+				csin = obj.model.cycles.csin{k};
+				w    = obj.model.cycles.w{k};
+				t    = 0:(length(fs) - 1);
+				residue = zeros(1, nEvents);
+				for nc=1:length(component)
+					c = component(nc);
+					residue =  residue + (...
+						ccos(c)*cos(w(c)*t) +...
+						csin(c)*sin(w(c)*t));
+				end
+				fs = fs +residue;
+				% Add Trend
+				if obj.model.trend.degree{k}
+					yp = polyval(obj.model.trend.coeffs{k}, 1:size(fs));
+					fs = fs + yp;
+					figure;
+					plot(yp);
+				end
+				obj.output(k,:) = fs;
+			end
 		end
 
 		function addSeasonality(obj)
 			series = obj.output;
 			[nSeries, nEvents] = size(series);
+			periods = zeros(nSeries,1);
 			for k=1:nSeries
-				period = obj.model.seasonality{k}.period;
-
-				% Ensure we have a whole number of periods in the current serie
-				nPeriods = ceil(nEvents/period);
-				x = [ series(k,:) NaN(1, nEvents - nPeriods*period) ];
-				
-				% Chop the serie into periods and add x0 to the beginning
-				y = [ obj.model.seasonality{k}.x0; reshape(x, [period nPeriods])'];
-
-				% Integrate on periods
-				z = cumsum(y);
-
-				% Get back to a single row
-				fs = reshape(z', [1 nPeriod*period]);
-				obj.output(k)= fs(1:nEvents);
+				periods(k) =  obj.model.seasonality{k}.period;
 			end
+			new_output = zeros(nSeries, nEvents + max(periods));
+			for k=1:nSeries
+				period = periods(k);
+				if period ~= 0
+					[serie, n] = removeNaN(series(k,:));
+					% Ensure we have a whole number of periods in the current serie
+					nPeriods = ceil(nEvents/period);
+					x = [ serie NaN(1, nPeriods*period - nEvents) ];
+					% Chop the serie into periods and add x0 to the beginning
+					y = [ obj.model.seasonality{k}.x0; reshape(x, [period nPeriods])'];
+					% Integrate on periods
+					z = cumsum(y);
+					% Get back to a single row
+					fs = reshape(z', [1 numel(z)]);
+					new_output(k,:)=   removeNaN(fs);
+				else
+					new_output(k,:) = fs;
+				end
+			end
+			obj.output = new_output;
 		end
 
 		function addStochasticTrend(obj)
 			series = obj.output;
 			[nSeries, nEvents] = size(series);
-			fs = zeros(nSeries, 1);
+			nRoot = obj.model.n_unit_root;
+			series = [series NaN(nSeries, max(nRoot))];
 			for k=1:nSeries
-				nRoot = obj.model.n_unit_root
-				while nRoot ~= 0
-					fs(k) = integrate(series(k), obj.model.initial_condition(k));
-					nRoot = nRoot - 1;
-				end
+				series(k,:) = integrate(...
+					series(k,:), ...
+					obj.model.s_trend.initial_condition(k));
 			end
-			obj.output = fs;
+			obj.output = series;
 		end
 
 		function addHeteroscedastic(obj)
@@ -336,13 +442,13 @@ classdef TimeSeries < hgsetget
 			gaps = obj.output_gaps;
 			H = zeros(nSeries, nEvents);
 			for index=1:nSeries
-				H(index) = obj.model.has_heteroscedastic(i) * exp(...
-					(gaps(index):nEvents+gaps(index))...
-						/(nEvents+gaps(index))...
-				)
+				H(index,:) = obj.model.has_heteroscedastic(index)...
+					./ exp((gaps(index)+1:nEvents+gaps(index))...
+					/(nEvents+gaps(index)));
 			end
+
 			H(H==0)=1;
-			fs = serie .* H;
+			fs = series ./ H;
 			obj.output = fs;
 		end
 
@@ -350,7 +456,7 @@ classdef TimeSeries < hgsetget
 		function assembleData(obj)
 			close all;
 			%% Study xcorrelations
-			fs = obj.removeNaN(obj.ts);
+			fs = removeNaN(obj.ts);
 			nSerie = size(fs,1);
 			obj.model.estimator.used_lags = cell(nSerie);
 			obj.model.estimator.input = cell(nSerie,1);
@@ -395,7 +501,7 @@ classdef TimeSeries < hgsetget
 		end %assembleData
 
 		function assembleDataForTest(obj)
-			fs = obj.removeNaN(obj.test_serie);
+			fs = removeNaN(obj.test_serie);
 			nSerie = size(fs,1);
 			obj.input_test = cell(nSerie,1);
 			nNodes = sum(cellfun(@length, obj.model.estimator.used_lags),2);
@@ -442,7 +548,8 @@ classdef TimeSeries < hgsetget
 			obj.removeHeteroscedastic('test');
 			obj.removeStochasticTrend('test');
 			obj.removeSeasonality('test');
-			obj.removeCycles('test');
+			obj.removeCyclesAndTrend('test');
+			obj.test_serie_residue = obj.test_serie;
 			close all;
 			% Format estimator input
 			obj.assembleDataForTest();
@@ -456,8 +563,13 @@ classdef TimeSeries < hgsetget
 					obj.estimated_output{k} = y;
 				end
 			end
-			obj.estimator.output = obj.estimated_output;
+			obj.model.estimator.output = obj.estimated_output;
 			[obj.output, obj.output_gaps] = cropSeries(obj.estimated_output);
+			obj.estimated_output = obj.output;
+			obj.addCyclesAndTrend();
+			obj.addSeasonality();
+			obj.addStochasticTrend();
+			obj.addHeteroscedastic();
 		end %applyModel
 	end%methods
 end
@@ -471,17 +583,71 @@ function [Y, X0] = diff2(X, n)
 	end
 end
 
-function [Y] = integrate(X, X0)
-	Y = X;
-	for k=length(X0):-1:1
-		Y = [X0(k) cumsum(Y)+X0(k)]
+function ndiff = ordint(serie)
+	nSerie = size(serie,1);
+	ndiff = zeros(1, nSerie);
+	for i=1:nSerie
+		s = serie(1,:);
+		has_root = true;
+		DWbound = 5e-2;
+		while has_root,
+			[ADF, ~, ~, ~] = unitroot (s);
+			if(ADF(3,4) <= 1e-1 && (abs(ADF(1,2)-2) < DWbound))
+				has_root = false;
+			elseif ADF(3,1) <= 0.1
+				has_root = false;
+			else
+				ndiff(i) = ndiff(i) + 1;
+				s = diff(s);
+			end
+		end
 	end
 end
 
-function [A, gaps] = cropSeries(series)
-	nSeries = length(series);
-	smaller_serie_length = min(cell2mat(cellfun(@x size(x,2), series)));
-	A = cell2mat(cellfun(@x x(end-smaller_serie_length+1:end), series));
-	gaps = cell2mat(cellfun(@(x) length(x)-smaller_serie_length+1, A, ...
-		'UniformOutput', false));
+function [Y] = integrate(X, X0)
+	if iscell(X)
+		X = cell2mat(X);
+	end
+	if iscell(X0)
+		X0 = cell2mat(X0);
+	end
+	[Y, n] = removeNaN(X);
+	for k=length(X0):-1:1
+		Y = [X0(k) cumsum(Y)+X0(k)];
+	end
+	Y = [Y NaN(1, n-length(X0))];
 end
+
+function [A, gaps] = cropSeries(series)
+	%nSeries = length(series);
+	smaller_serie_length = min(cellfun(@(x) size(x,2), series));
+	A = cell2mat(cellfun(@(x) x(end-smaller_serie_length+1:end), series,...
+		'UniformOutput', false));
+	gaps = cell2mat(cellfun(@(x) length(x)-smaller_serie_length, ...
+		series, 'UniformOutput', false));
+end
+
+function plotSerie(serie)
+	figure;
+	hold on;
+	plot(serie);
+	grid on;
+end
+
+function fs = addNaN(serie, n)
+	if n ~= 0
+		n_serie = size(serie,1);
+		nan_matrix = NaN(n_serie, n);
+		fs = [nan_matrix serie];
+	else
+		fs = serie;
+	end
+end
+
+function [fs,n] = removeNaN(serie)
+	fs = serie;
+	indexes = find(sum(isnan(fs),1)==size(fs,1));
+	fs(:,indexes) = [];
+	n = length(indexes);
+end
+

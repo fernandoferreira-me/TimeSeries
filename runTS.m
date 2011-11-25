@@ -6,7 +6,7 @@ clear, clc
 % Load data
 %serie = load('./flour-price.dat')';
 %serie_trval = serie(:, 1:length(serie)-30);
-%serie_teste= serie(:, length(serie)-30+1:end);
+%serie_teste= serie(:, length(serie)-30+1:end);ee
 addpath('data/sinteticos');
 [serie_trval, serie_test] = sinteticas(0);
 
@@ -24,6 +24,7 @@ nnobj = swirlTraining();
 TS.createEstimator(nnobj);
 
 % Apply model in test set
-TS.applyModel(test_serie);
+%load 'net_trained_TS.mat';
+TS.applyModel(serie_test);
 
 
